@@ -394,17 +394,56 @@ logs/join_python_<timestamp>.log
 
 Each active Python script creates a timestamped `.log` file in `logs/`. Each entry includes a timestamp, and unhandled errors are recorded with their traceback. Contract-generation summary reports are saved in the same folder. `src/sap_client.py` preserves existing CSV rows and retrieves only customer numbers not already listed there.
 
-### 3. Review Customer Name Mappings
+### 3. Compare the Source and Enriched Workbooks
+
+```powershell
+python src\compare_excel.py
+```
+
+By default, the script compares the configured `comparison_first` and
+`comparison_second` workbooks in `config.yaml`, using the `uniform` sheet.
+You can optionally pass two workbook paths and a sheet name:
+
+```powershell
+python src\compare_excel.py "res\first.xlsx" "res\second.xlsx" --sheet uniform
+```
+
+Rows are matched by content across the entire sheet, regardless of their
+position, with columns matched by header. `Anmerkungen` is excluded from the
+content comparison. Each occurrence can be matched only once; equal rows are
+counted as the smaller number of occurrences in the two files.
+
+The report identifies `Erste Datei` and `Zweite Datei` by their paths. For each
+content group with unequal occurrence counts, it shows the counts, physical
+row numbers, and available customer identifiers. Unmatched occurrences are warnings
+if any row in the group has `OK` in `Anmerkungen` (case-insensitive), or if
+the content occurs more than once in either file. Other unmatched occurrences
+are regular deviations. The deviation and warning totals count unmatched
+occurrences, so changing one row can count as one missing and one added row.
+Warnings are included in `Abweichende Zeilen` and counted separately.
+
+For a possible column-by-column comparison, unmatched content groups must have
+the same nonempty `Kundennummer` and `Kunde`. Groups are paired only when they
+are each other's unique closest match, measured by the number of differing
+columns; this is repeated for the remaining groups. Only changed columns are
+shown as `old -> new`. These are possible matches, not proof that a row was
+edited. Ambiguous or unpaired groups are reported without a column comparison.
+This diagnostic pairing does not change the occurrence counts or warnings.
+
+Each run writes a timestamped report to `logs/compare_excel_<timestamp>.log`.
+The report includes the row differences, totals, and warnings.
+
+### 4. Review Customer Name Mappings
 
 Open `res/EVB_IT_Vertragsuebersicht_Enriched.xlsx` and use the Excel formula in the [pre-generation review section](#pre-generation-customer-name-review-in-excel) to flag and manually check possible name mismatches. Resolve any incorrect customer details before continuing.
 
-### 4. Generate Contracts
+### 5. Generate Contracts
 
 ```powershell
 python src\generate_contracts_separate.py
 ```
 
-### 5. Apply Final Formatting
+### 6. Apply Final Formatting
 
 ```powershell
 python src\beautify_contracts.py

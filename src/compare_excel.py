@@ -43,6 +43,50 @@ def read_table(book, sheet):
     return names, records()
 
 
+def comparison_pairs(groups, content_keys):
+    if not {"kundennummer", "kunde"} <= set(content_keys):
+        return {}
+
+    customer_indexes = [content_keys.index(key) for key in ("kundennummer", "kunde")]
+    candidates = [{}, {}]
+    for index, (signature, (first_rows, second_rows)) in enumerate(groups):
+        if len(first_rows) == len(second_rows):
+            continue
+        customer = tuple(signature[i] for i in customer_indexes)
+        if any(value in (None, "") for _, value in customer):
+            continue
+        side = 0 if len(first_rows) > len(second_rows) else 1
+        candidates[side][index] = customer
+
+    pairs = {}
+    while candidates[0] and candidates[1]:
+        best = [{}, {}]
+        for side in (0, 1):
+            for index, customer in candidates[side].items():
+                distances = [
+                    (sum(a != b for a, b in zip(groups[index][0], groups[other][0])), other)
+                    for other, other_customer in candidates[1 - side].items()
+                    if customer == other_customer
+                ]
+                if distances:
+                    minimum = min(distance for distance, _ in distances)
+                    nearest = [other for distance, other in distances if distance == minimum]
+                    if len(nearest) == 1:
+                        best[side][index] = nearest[0]
+        found = [
+            (first, second)
+            for first, second in best[0].items()
+            if best[1].get(second) == first
+        ]
+        if not found:
+            break
+        for first, second in found:
+            pairs[first] = second
+            del candidates[0][first]
+            del candidates[1][second]
+    return pairs
+
+
 def compare(first, second, sheet="uniform"):
     counts = dict(equal=0, different=0, warnings=0)
     logs_folder = get_configured_path("logs_folder")
@@ -57,7 +101,9 @@ def compare(first, second, sheet="uniform"):
             log.write(message + "\n")
 
         report(f"Started: {started_at:%Y-%m-%d %H:%M:%S}")
-        report(f"Comparing {first} with {second} (sheet: {sheet or 'first sheet'})")
+        report(f"Erste Datei: {first}")
+        report(f"Zweite Datei: {second}")
+        report(f"Tabellenblatt: {sheet or 'erstes Tabellenblatt'}")
         try:
             with ExitStack() as stack:
                 tables = []
@@ -85,7 +131,10 @@ def compare(first, second, sheet="uniform"):
                         group = groups.setdefault(signature, ([], []))
                         group[file_index].append((number, row))
 
-                for first_rows, second_rows in groups.values():
+                grouped_rows = list(groups.items())
+                pairs = comparison_pairs(grouped_rows, content_keys)
+                paired = set(pairs) | set(pairs.values())
+                for index, (_, (first_rows, second_rows)) in enumerate(grouped_rows):
                     first_count, second_count = len(first_rows), len(second_rows)
                     counts["equal"] += min(first_count, second_count)
                     difference = abs(first_count - second_count)
@@ -101,18 +150,39 @@ def compare(first, second, sheet="uniform"):
                     counts["warnings"] += difference if warning else 0
                     report(
                         f"{'WARNUNG' if warning else 'Unterschied'} | "
-                        f"Datei 1: {first_count} | Datei 2: {second_count} | "
+                        f"Erste Datei: {first_count} | Zweite Datei: {second_count} | "
                         f"Abweichung: {difference}"
                     )
-                    for file_number, rows in enumerate((first_rows, second_rows), 1):
+                    for label, rows in (("Erste Datei", first_rows),
+                                        ("Zweite Datei", second_rows)):
                         if rows:
                             report(
-                                f"  Zeilen Datei {file_number}: "
+                                f"  Zeilen {label}: "
                                 + ", ".join(str(number) for number, _ in rows)
                             )
                     row = (first_rows or second_rows)[0][1]
-                    for key in content_keys:
-                        report(f"  {names[key]}: {row[key]!r}")
+                    for key in ("kundennummer", "kunde"):
+                        if key in row and row[key] not in (None, ""):
+                            report(f"  {names[key]}: {row[key]!r}")
+                    if index not in paired:
+                        report("  Kein eindeutiger Vergleichspartner für die überschüssigen Zeilen.")
+
+                if pairs:
+                    report("Mögliche Änderungen (eindeutig ähnlichste Zeilengruppen):")
+                    for first_index, second_index in pairs.items():
+                        first_signature, (first_rows, first_matches) = grouped_rows[first_index]
+                        second_signature, (second_matches, second_rows) = grouped_rows[second_index]
+                        report(
+                            "  Erste Datei Zeilen: "
+                            + ", ".join(str(number) for number, _ in first_rows[len(first_matches):])
+                            + " | Zweite Datei Zeilen: "
+                            + ", ".join(str(number) for number, _ in second_rows[len(second_matches):])
+                        )
+                        for key, before_value, after_value in zip(
+                            content_keys, first_signature, second_signature
+                        ):
+                            if before_value != after_value:
+                                report(f"    {names[key]}: {before_value[1]!r} -> {after_value[1]!r}")
         except (ValueError, KeyError, OSError) as exc:
             report(f"ERROR: {exc}")
             raise
