@@ -1,0 +1,62 @@
+# Customer and contract data
+*.csv
+*.[cC][sS][vV]
+*.xls
+*.[xX][lL][sS]
+*.xlsx
+*.[xX][lL][sS][xX]
+*.xlsm
+*.[xX][lL][sS][mM]
+*.docx
+*.[dD][oO][cC][xX]
+*.pdf
+*.[pP][dD][fF]
+*.png
+*.[pP][nN][gG]
+
+# Local configuration may contain customer-specific values
+*.yaml
+*.[yY][aA][mM][lL]
+*.yml
+*.[yY][mM][lL]
+
+# Private project notes
+/docs/TODO.md
+
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs and generated customer documents
+/logs/
+logs/
+*.log
+join_log.txt
+contract_generation_log_*.txt
+
+# Local data and generated files
+/res/
+/output/
+/archive/
+*/output*/
+
+# Build and coverage artifacts
+build/
+dist/
+*.egg-info/
+.coverage
+htmlcov/
+
+# OS files
+.DS_Store
+Thumbs.db
