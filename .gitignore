@@ -13,6 +13,7 @@
 *.[pP][dD][fF]
 *.png
 *.[pP][nN][gG]
+!/docs/General Workflow - Vertragsumstellung.*
 
 # Local configuration may contain customer-specific values
 *.yaml

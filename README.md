@@ -17,6 +17,8 @@ The automation workflow consists of four main stages:
 
 This approach ensures that customer information is always obtained directly from SAP while preserving the original ordering structure of each customer.
 
+![General workflow for EVB-IT contract automation](docs/General%20Workflow%20-%20Vertragsumstellung.png)
+
 ## Project layout and local configuration
 
 - Python scripts and shared helpers are in `src/`.
