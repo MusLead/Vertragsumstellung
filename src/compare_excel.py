@@ -1,7 +1,7 @@
-"""Compare two Excel tables by physical row, matching columns by header."""
+"""Compare cached Excel cell values by content, matching columns by header."""
 import argparse
 from contextlib import ExitStack, closing
-from itertools import zip_longest
+from datetime import datetime
 
 from openpyxl import load_workbook
 
@@ -10,6 +10,10 @@ from project_config import get_configured_path
 
 def normal(value):
     return str(value).strip().casefold()
+
+
+def is_acknowledged(value):
+    return normal(value) == "ok"
 
 
 def read_table(book, sheet):
@@ -26,7 +30,7 @@ def read_table(book, sheet):
         if value is None or not key or key in names:
             raise ValueError(f"{ws.title}: Empty or duplicate header: {value!r}")
         names[key] = str(value)
-    missing = {"kundennummer", "kunde", "status"} - names.keys()
+    missing = {"anmerkungen"} - names.keys()
     if missing:
         raise ValueError(f"{ws.title}: Missing headers: {', '.join(sorted(missing))}")
 
@@ -39,44 +43,85 @@ def read_table(book, sheet):
     return names, records()
 
 
-def compare(first, second, sheet=None):
+def compare(first, second, sheet="uniform"):
     counts = dict(equal=0, different=0, warnings=0)
-    with ExitStack() as stack:
-        tables = []
-        for path in (first, second):
-            book = stack.enter_context(closing(load_workbook(path, read_only=True)))
-            tables.append(read_table(book, sheet))
-        (names, before), (other_names, after) = tables
-        if names.keys() != other_names.keys():
-            raise ValueError(f"Different columns: {sorted(names.keys() ^ other_names.keys())}")
+    logs_folder = get_configured_path("logs_folder")
+    logs_folder.mkdir(parents=True, exist_ok=True)
+    started_at = datetime.now()
+    timestamp = started_at.strftime("%Y%m%d_%H%M%S_%f")
+    log_file = logs_folder / f"compare_excel_{timestamp}.log"
 
-        for number, (a, b) in enumerate(zip_longest(before, after, fillvalue={}), 2):
-            if not (a or b):
-                continue
-            changes = []
-            if not a or not b:
-                changes.append(f"Row missing or empty in file {1 if not a else 2}")
-            else:
-                for key, label in names.items():
-                    x, y = a[key], b[key]
-                    if key == "status" and normal(x) == normal(y) == "ok":
+    with log_file.open("w", encoding="utf-8") as log:
+        def report(message):
+            print(message)
+            log.write(message + "\n")
+
+        report(f"Started: {started_at:%Y-%m-%d %H:%M:%S}")
+        report(f"Comparing {first} with {second} (sheet: {sheet or 'first sheet'})")
+        try:
+            with ExitStack() as stack:
+                tables = []
+                for path in (first, second):
+                    book = stack.enter_context(
+                        closing(load_workbook(path, read_only=True, data_only=True))
+                    )
+                    tables.append(read_table(book, sheet))
+                (names, before), (other_names, after) = tables
+                if names.keys() != other_names.keys():
+                    raise ValueError(
+                        f"Different columns: {sorted(names.keys() ^ other_names.keys())}"
+                    )
+
+                content_keys = [key for key in names if key != "anmerkungen"]
+                groups = {}
+                for file_index, rows in enumerate((before, after)):
+                    for number, row in enumerate(rows, 2):
+                        if not row:
+                            continue
+                        signature = tuple(
+                            (isinstance(row[key], bool), row[key])
+                            for key in content_keys
+                        )
+                        group = groups.setdefault(signature, ([], []))
+                        group[file_index].append((number, row))
+
+                for first_rows, second_rows in groups.values():
+                    first_count, second_count = len(first_rows), len(second_rows)
+                    counts["equal"] += min(first_count, second_count)
+                    difference = abs(first_count - second_count)
+                    if not difference:
                         continue
-                    if x != y or isinstance(x, bool) != isinstance(y, bool):
-                        changes.append((key, f"{label}: {x!r} -> {y!r}"))
-            if not changes:
-                counts["equal"] += 1
-                continue
-            counts["different"] += 1
-            ok = any(normal(row.get("status")) == "ok" for row in (a, b))
-            warning = ok and (not a or not b or any(key != "status" for key, _ in changes))
-            counts["warnings"] += int(warning)
-            customer = a or b
-            print(f"{'WARNUNG' if warning else 'Unterschied'} | Zeile {number} | "
-                  f"Kundennummer {customer['kundennummer']} | Kunde {customer['kunde']}")
-            for change in changes:
-                print("  " + (change[1] if isinstance(change, tuple) else change))
-    print("Gleiche Zeilen: {equal} | Abweichende Zeilen: {different} | "
-          "Davon Warnungen: {warnings}".format(**counts))
+
+                    acknowledged = any(
+                        is_acknowledged(row.get("anmerkungen"))
+                        for _, row in first_rows + second_rows
+                    )
+                    warning = acknowledged or max(first_count, second_count) > 1
+                    counts["different"] += difference
+                    counts["warnings"] += difference if warning else 0
+                    report(
+                        f"{'WARNUNG' if warning else 'Unterschied'} | "
+                        f"Datei 1: {first_count} | Datei 2: {second_count} | "
+                        f"Abweichung: {difference}"
+                    )
+                    for file_number, rows in enumerate((first_rows, second_rows), 1):
+                        if rows:
+                            report(
+                                f"  Zeilen Datei {file_number}: "
+                                + ", ".join(str(number) for number, _ in rows)
+                            )
+                    row = (first_rows or second_rows)[0][1]
+                    for key in content_keys:
+                        report(f"  {names[key]}: {row[key]!r}")
+        except (ValueError, KeyError, OSError) as exc:
+            report(f"ERROR: {exc}")
+            raise
+
+        report(
+            "Gleiche Zeilen: {equal} | Abweichende Zeilen: {different} | "
+            "Davon Warnungen: {warnings}".format(**counts)
+        )
+        report(f"Logdatei: {log_file}")
     return counts
 
 
@@ -92,7 +137,11 @@ if __name__ == "__main__":
         nargs="?",
         default=str(get_configured_path("comparison_second")),
     )
-    parser.add_argument("--sheet", help="Worksheet name (default: first sheet in each file)")
+    parser.add_argument(
+        "--sheet",
+        default="uniform",
+        help="Worksheet name (default: uniform)",
+    )
     args = parser.parse_args()
     try:
         compare(args.first, args.second, args.sheet)
