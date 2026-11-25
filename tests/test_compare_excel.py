@@ -69,6 +69,18 @@ class CompareExcelTests(unittest.TestCase):
         counts, _ = self.run_compare(first, second)
         self.assertEqual(counts, {"equal": 0, "different": 2, "warnings": 2})
 
+    def test_equal_duplicate_counts_and_blank_rows(self):
+        headers = ["Kunde", "Anmerkungen"]
+        first = self.workbook("first.xlsx", headers, [
+            ["A", "OK"], [None, None], ["A", None],
+        ])
+        second = self.workbook("second.xlsx", headers, [
+            ["A", None], ["A", "OK"],
+        ])
+        counts, output = self.run_compare(first, second)
+        self.assertEqual(counts, {"equal": 2, "different": 0, "warnings": 0})
+        self.assertNotIn("WARNUNG", output)
+
     def test_header_order_and_boolean_values(self):
         first = self.workbook("first.xlsx", ["Kunde", "Wert", "Anmerkungen"], [
             ["A", True, "OK"], ["B", 2, None],
